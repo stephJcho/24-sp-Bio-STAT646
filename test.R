@@ -1,0 +1,1 @@
+# This script is to check whether the Git repository has been set up properly
