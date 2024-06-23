@@ -1,0 +1,325 @@
+---
+title: "STAT646-Midterm Project"
+author: "Stephen Jaeyoung Cho"
+output: 
+  pdf_document: 
+    latex_engine: lualatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Modified from the original work to include data description (from guidelines and 'midterm_kickstart.R')
+
+## Question 1. Part 1: Segerstolpe et al.
+
+```{r library, echo=FALSE}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+```
+
+## Setup for Seger data with lines from midterm_kickstart
+
+```{r datainfo}
+## Data description and download links
+
+# Paper: PMID 27667667
+# Data link (available in paper):
+# https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-5061
+# From E-MTAB-5061.idf.txt
+# Format of the datafile ‘pancreas_refseq_rpkms_counts_3514sc.txt’: 
+# The file contains both the normalized rpkm values and the raw read counts 
+# for each sample. Columns correspond to samples and rows to genes. 
+# The first line of the file (starting with: #samples) contains the sample IDs 
+# to be used as column labels for both the rpkm and counts.
+# The columns of the rpkm and the counts have the same order with the sample IDs.
+# Columns 1:3514 correspond to rpkm values, Columns 3515:7028 correspond to read counts.
+# Rows 1:26179 correspond to data for RefSeq genes, Rows 26180:26271 correspond 
+# to data for the 92 external RNA spike-in controls (ERCCs), 
+# Row 26272 (last) contains data for ‘eGFP’.
+
+# Paper: PMID 27667667
+# Data link (available in paper):
+# https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-5061
+
+```
+
+```{r s, echo=FALSE}
+cell.barcodes <- scan(text = readLines("data/pancreas_refseq_rpkms_counts_3514sc.txt", 1), what = "", quiet = TRUE)[-1] # 3514 cell barcodes
+count=read.table('data/pancreas_refseq_rpkms_counts_3514sc.txt',sep='\t')
+gene.meta=count[,1:2] # First two columns are gene symbols and IDs
+count=count[,-(1:2)]
+count=as.matrix(count[,3515:7028]) # Columns 3515:7028 correspond to read counts.
+rownames(count)=gene.meta[,1]
+colnames(count)=cell.barcodes
+rm(gene.meta, cell.barcodes)
+cell.meta=read.csv('data/E-MTAB-5061.sdrf.txt',sep='\t')
+table(cell.meta$Characteristics..individual.) # Six healthy individuals, four T2D patients
+cell.meta=cell.meta[,1:5] # Remove unnecessary meta info for the cells
+```
+
+## Hint 1: Reordering the cells
+
+```{r hint1}
+col.order <- cell.meta$Source.Name
+count <- count[, col.order]
+
+all(colnames(count)==cell.meta$Source.Name)
+```
+
+The cells in both count matrix and cell.meta were reordered in alphabetical order so that they match each other.  
+  
+  
+## Removing the Duplicates
+
+  
+Next, we remove the duplicates in count matrix, so that we can successfully create a Seurat object.
+
+```{r removeduplicates}
+count_uniq <- count[!duplicated(rownames(count)), ]
+dim(count_uniq)
+all(colnames(count_uniq)==cell.meta$Source.Name)
+```
+
+## Creating a Seurat object
+
+```{r Seurat}
+Seger <- CreateSeuratObject(counts = count_uniq, project = "Segerstolpe", meta.data = cell.meta)
+dim(Seger)
+```
+We have successfully created a Seurat object, and the description of it does not show any significant sign of error.  
+  
+
+## Hint 2: Selecting only the healthy individuals
+
+Next, we leave only the healthy individuals and remove the T2D patients. From running the table() function on cell.meta object we have noticed that we can distinguish T2D patients based on whether we can find 'T2D' in it.
+
+```{r hint2}
+Seger <- Seger[, grep("T2D", colnames(Seger), invert = TRUE)]
+dim(Seger)
+```
+
+## QC for Seurat Object - Removing outliers
+
+```{r qc1}
+Seger[["percent.mt"]] <- PercentageFeatureSet(Seger, pattern = "^mt-")
+
+VlnPlot(Seger, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+While we take the standard procedure of setting QC thresholds to remove outliers, mt percentage does not display specific pattern and are all equal to zero. Nonetheless, from the violin plot, we can set threshold for number of features, and for this project, we take a conservative approach and set the lower bound as 1000 and upper bound as 11000.
+
+```{r qc2}
+Seger <- subset(Seger, subset = nFeature_RNA > 1000 & nFeature_RNA < 11000)
+dim(Seger)
+```
+
+## Normalization & dimension reduction
+
+```{r Seger_normanddimred}
+Seger <- NormalizeData(Seger, normalization.method = "LogNormalize", scale.factor = 10000)
+Seger <- FindVariableFeatures(Seger, selection.method = 'vst', nfeatures = 2000)
+Seger <- ScaleData(Seger, features = rownames(Seger))
+Seger <- RunPCA(Seger, features = VariableFeatures(object = Seger))
+ElbowPlot(Seger)
+```
+
+From the elbow plot, we first conduct tSNE and carry out visualizations without any additional information.
+
+```{r Seger_tSNE}
+Seger <- RunTSNE(Seger, dims = 1:5)
+p1=DimPlot(Seger, reduction = "tsne", label = TRUE)
+p1 #tSNE plot
+p2=DimPlot(Seger, reduction = "tsne", group.by='Characteristics..individual.')
+p2
+```
+
+The first tSNE plot does not suggest any significant evidence that the cells cluster by individuals.  
+
+The second plot is just for sanity check purposes, where we can confirm that the 6 categories in the first plot refer to individuals, with just different variable names. The first tSNE plot has automatically inferred to the six individuals without any specification or argument provided. 
+  
+  
+## Visualization of expression with marker genes
+
+Finally, we take the provided marker genes and create UMAP plots to determine whether the cells cluster by discrete cell types in human pancreas.
+
+```{r Seger_markergenes}
+FeaturePlot(Seger, features = c("KRT19","PRSS1","GCG","INS","PPY","SST","GHRL"))
+```
+
+It is more reasonable to conclude that the cells do cluster by discrete cell types in human pancreas.
+
+## Q1. Part 2: Baron et al.
+
+```{r baronkickstart, echo=FALSE}
+baron1=read.csv('data/GSM2230757_human1_umifm_counts.csv.gz')
+baron2=read.csv('data/GSM2230758_human2_umifm_counts.csv.gz')
+baron3=read.csv('data/GSM2230759_human3_umifm_counts.csv.gz')
+baron4=read.csv('data/GSM2230760_human4_umifm_counts.csv.gz')
+
+# Check that the columns are the same before combining rows
+all(colnames(baron1)==colnames(baron2))
+all(colnames(baron1)==colnames(baron3))
+all(colnames(baron1)==colnames(baron4))
+
+baron=rbind(baron1, baron2, baron3, baron4)
+rm(baron1,baron2,baron3,baron4)
+dim(baron)
+cell.meta=baron[,1:3]
+colnames(cell.meta)[1]='cell'
+cell.meta$individual=substr(cell.meta$cell, start=1, stop=6)
+count=as.matrix(baron[,-(1:3)])
+rm(baron)
+rownames(count)=cell.meta$cell
+rownames(cell.meta)=cell.meta$cell
+colnames(cell.meta)[3]='celltype'
+```
+
+```{r Baron_Seurat}
+count = t(count)
+all(colnames(count)==cell.meta$cell)
+Baron <- CreateSeuratObject(counts = count, project = "Baron", min.cells = 3, min.features = 200, meta.data = cell.meta)
+Baron
+```
+
+For this case, we would have to transpose the count matrix to match the dimension with metadata. After simple sanity check, we proceed to create Seurat object.
+
+```{r Baron_QC}
+Baron[["percent.mt"]] <- PercentageFeatureSet(Baron, pattern = "^mt-")
+VlnPlot(Baron, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+Baron <- subset(Baron, subset = nFeature_RNA > 600 & nFeature_RNA < 3800) #removing outliers
+```
+
+Here, we have decided the QC thresholds based on violin plot and removed outliers.
+
+```{r Baron_normdimred}
+Baron <- NormalizeData(Baron, normalization.method = "LogNormalize", scale.factor = 10000)
+Baron <- FindVariableFeatures(Baron, selection.method = 'vst', nfeatures = 2000)
+Baron <- ScaleData(Baron, features = rownames(Baron))
+Baron <- RunPCA(Baron, features = VariableFeatures(object = Baron))
+ElbowPlot(Baron)
+```
+
+Moving on to clustering, we carry out the first visualization, by creating a tSNE plot.
+
+```{r Baron_tSNE}
+Baron <- RunTSNE(Baron, dims = 1:10)
+p1=DimPlot(Baron, reduction = "tsne")
+p1 #tSNE plot
+```
+
+Again, the tSNE plot does not convince that the cells cluster by donors.
+
+  
+  
+## Visualization of expression with marker genes
+  
+Lastly, we utilize the marker genes to visualize their expression profiles across cells.
+```{r Baron_withmarkers}
+FeaturePlot(Baron, features = c("KRT19","PRSS1","GCG","INS","PPY","SST","GHRL"))
+```
+
+By comparing the second plot to the first, we can conclude that the cells cluster by discrete cell types in human pancreas for Baron dataset as well.
+
+## Question 2. Part 1: Baron et al.
+
+For question 2, we first try to identify and visualize cell-type-specific gene expressions in a heatmap for Baron et al. dataset. It can be easily carried out using cell type information within the object's metadata.
+
+```{r Q2_celltypes_heatmap_Baron}
+Idents(Baron)=Baron$celltype
+Baron.markers <- FindAllMarkers(Baron, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Baron.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(Baron, features = top10$gene) + NoLegend()
+```
+
+
+## Question 2. Part 2: Segerstolpe et al.
+
+Next, we move on to apply the same procedure to Segerstolpe et al. dataset, but we will first need to annotate the cell types.
+
+```{r Q2_celltypes_heatmap_Segerstolpe_1}
+anchors <- FindTransferAnchors(
+  reference = Baron,
+  query = Seger,
+  dims = 1:10,
+  reference.reduction = "pca",
+  recompute.residuals = FALSE
+)
+
+Seger <- MapQuery(
+  anchorset = anchors,
+  query = Seger,
+  reference = Baron,
+  refdata = list(
+    celltype = "celltype"
+  ),
+  reference.reduction = "pca"
+)
+```
+
+Now, for Segerstolpe et al. dataset, we can refer to newly added 'predicted cell type' info within the object and produce a heatmap to visualize cell-type-specific gene expressions, with top 10 genes per cell type.
+
+```{r Q2_celltypes_heatmap_Segerstolpe_2}
+Idents(Seger)=Seger$predicted.celltype
+Seger.markers <- FindAllMarkers(Seger, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Seger.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(Seger, features = top10$gene) + NoLegend()
+```
+
+## Question 3
+
+## Combining two datasets
+
+In order to conduct a joint analysis of the two datasets, we first create 'datasource' label for each object so that we can distinguish the two sources that has different protocol/technology. Then, we find integration anchors and create an integrated dataset.
+
+```{r integration_kickstart}
+Seger$datasource='Seger'
+Baron$datasource='Baron'
+Seger$celltype=Seger$predicted.celltype
+
+Panc.anchors <- FindIntegrationAnchors(object.list = list(Seger, Baron), dims = 1:10)
+Combined <- IntegrateData(anchorset = Panc.anchors, dims = 1:10)
+```
+
+## Q3. Part 1: Clustering without data integration
+
+With the combined dataset, we first carry out standard clustering process without data integration.
+
+```{r combined_withoutIntegration}
+DefaultAssay(Combined) <- "RNA" # Without integration (i.e., concatenating cells)
+Combined <- ScaleData(Combined, verbose = FALSE)
+Combined <- RunPCA(Combined, npcs = 30, verbose = FALSE)
+Combined <- RunUMAP(Combined, reduction = "pca", dims = 1:20)
+Combined <- FindNeighbors(Combined, reduction = "pca", dims = 1:20)
+Combined <- FindClusters(Combined, resolution = 0.5)
+
+p3 <- DimPlot(Combined, reduction = "umap", group.by = "datasource", label=TRUE)
+p4 <- DimPlot(Combined, reduction = "umap", group.by='celltype', label=TRUE)
+p3
+p4
+```
+The first plot suggests that cells tend to cluster by protocol/technology (labeled as 'datasource') without data integration. The second plot is visualization based on cell types.  
+
+## Q3. Part 2: Clustering after data integration by CCA alignment
+
+```{r combined_withIntegration}
+DefaultAssay(Combined) <- "integrated" # Without integration (i.e., concatenating cells)
+Combined <- ScaleData(Combined, verbose = FALSE)
+Combined <- RunPCA(Combined, npcs = 30, verbose = FALSE)
+Combined <- RunUMAP(Combined, reduction = "pca", dims = 1:20)
+Combined <- FindNeighbors(Combined, reduction = "pca", dims = 1:20)
+Combined <- FindClusters(Combined, resolution = 0.5)
+
+
+p5 <- DimPlot(Combined, reduction = "umap", group.by = "datasource", label=TRUE)
+p6 <- DimPlot(Combined, reduction = "umap", group.by='celltype', label=TRUE)
+p5
+p6
+```
+The first plot suggests that the integration has resulted in a better mixture of cells, so that it is less clustered based on protocol/technology. Next is the post-integration UMAP plot.
