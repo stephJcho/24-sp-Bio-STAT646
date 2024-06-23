@@ -1,0 +1,103 @@
+---
+title: "Ridge and Lasso Regression"
+fig_width: 3
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+subtitle: STAT 446/646 Statistical Bioinformatics
+fig_height: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Here we apply the best subset selection approach to the `Hitters` data. We wish to predict a baseball player's `Salary` on the basis of various statistics associated with performance in the previous year. The `na.omit()` function removes all of the rows that have missing values in any variable.
+
+```{r, message=FALSE, warning=FALSE}
+library(ISLR)
+Hitters=na.omit(Hitters)
+x <- model.matrix(Salary ~ ., Hitters)[, -1]
+y <- Hitters$Salary
+dim(x)
+```
+
+# Ridge Regression
+
+The `glmnet` package provides functionality to fit ridge regression and lasso models. We load the package and call `glmnet()` to perform ridge regression.
+
+```{r, message=FALSE, warning=FALSE}
+library(glmnet)
+grid <- 10^seq(10, -2, length = 100)
+# alpha=0 for ridge penalty; alpha=1 for lasso penalty
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+dim(coef(ridge.mod))
+min(abs(coef(ridge.mod))) # ridge does not shrink beta to zero
+coef(ridge.mod)[1:5,1:5] # feature coefficients with different lambda
+head(ridge.mod$lambda)
+
+plot(log(ridge.mod$lambda), coef(ridge.mod)[2,]/sd(coef(ridge.mod)[2,]), type='l', col=2, ylim=c(-4,4), xlab='log(lambda)', ylab='Scaled coefficients')
+for(i in 3:nrow(coef(ridge.mod))){
+  points(log(ridge.mod$lambda), coef(ridge.mod)[i,]/sd(coef(ridge.mod)[i,]), type='l', col=i)
+}
+```
+
+We can choose different values for $\lambda$ by running cross-vaidation on ridge regression using `cv.glmnet()`.
+
+```{r}
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha=0)
+plot(cv.out)
+
+bestlam <- cv.out$lambda.min
+bestlam
+cv.out$lambda.1se
+```
+
+It includes the cross-validation curve (red dotted line), and upper and lower standard deviation curves along the $\lambda$ sequence (error bars). Two selected $\lambda$'s are indicated by the vertical dotted lines. `lambda.min` is the value of $\lambda$ that gives minimum mean cross-validated error. The other $\lambda$ saved is `lambda.1se`, which gives the most regularized model such that error is within one standard error of the minimum. 
+
+# The Lasso
+
+The lasso model can be estimated in the same way as ridge regression. The `alpha = 1` parameter tells `glmnet()` to run lasso regression instead of ridge regression.
+
+```{r, warning=FALSE}
+lasso.mod <- glmnet(x, y, alpha = 1, lambda = grid)
+plot(lasso.mod)
+```
+
+Similarly, we can perform cross-validation using identical step as we did in the last exercise on ridge regression.
+
+```{r, warning=FALSE}
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+bestlam
+```
+
+
+```{r}
+predict(lasso.mod, s = bestlam, type = "coefficients")
+y.pred=cbind(rep(1, nrow(x)),x)%*%predict(lasso.mod, s = bestlam, type = "coefficients")[1:20,,drop=F]
+head(y.pred)
+cor(as.numeric(y.pred), y)
+predict(lasso.mod, s = 10, type = "coefficients")
+```
+
+
+# The Lasso for Logistic Regression
+
+For logistic regression, we set `family` option to "binomial" and plot against the deviance explained and show the labels. For tuning of $\lambda$, we use misclassification error as the criterion for 10-fold cross-validation.
+
+```{r}
+load('data/BinomialExample.rdata')
+fit = glmnet(x, y, family = "binomial", alpha = 1) 
+plot(fit, xvar = "dev", label = TRUE)
+cvfit = cv.glmnet(x, y, family = "binomial", type.measure = "class")
+plot(cvfit)
+```

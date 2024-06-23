@@ -1,0 +1,92 @@
+---
+title: "K-Nearest Neighbor"
+fig_width: 3
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+subtitle: STAT 446/646 Statistical Bioinformatics
+fig_height: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# K-nearest neighbor algorithm
+
+In pattern recognition, the k-nearest neighbors algorithm (k-NN) is a non-parametric method used for classification and regression. In both cases, the input consists of the k closest training examples in the feature space. The output depends on whether k-NN is used for classification or regression:
+
+* In k-NN classification, the output is a class membership. An object is classified by a plurality vote of its neighbors, with the object being assigned to the class most common among its k nearest neighbors (k is a positive integer, typically small). If k = 1, then the object is simply assigned to the class of that single nearest neighbor.
+
+* In k-NN regression, the output is the property value for the object. This value is the average of the values of k nearest neighbors.
+
+# Toy data set: Iris
+
+Numerous guides have been written on the exploration of this widely known dataset. Iris, introduced by Ronald Fisher in his 1936 paper The use of multiple measurements in taxonomic problems, contains three plant species (setosa, virginica, versicolor) and four features measured for each sample. These quantify the morphologic variation of the iris flower in its three species, all measurements given in centimeters.
+
+* `Sepal.Length` = measurements in centimeters of the variables sepal length.
+* `Sepal.Width` = measurements in centimeters of the variables sepal width.
+* `Petal.Length` = measurements in centimeters of the variables petal length.
+* `Petal.Width` = measurements in centimeters of the variables petal width.
+* `Species` = three species are Iris setosa, versicolor, and virginica.
+
+
+```{r, message=FALSE, cache=TRUE}
+library(datasets)
+data(iris)
+summary(iris)
+boxplot(iris$Petal.Length~iris$Species, xlab='Species', ylab='Petal Length')
+plot(iris$Sepal.Length, iris$Petal.Length, 
+     xlab='Sepal Length', ylab='Petal Length',
+     col=iris$Species, pch=16)
+pairs(iris[1:4], pch=16, cex=0.5, col=iris$Species, lower.panel = NULL)
+```
+
+We will first split the data into 30% test and 70% training.
+
+```{r, message=FALSE, cache=TRUE}
+dim(iris)
+set.seed(1)
+test.index=sample(nrow(iris), 0.3*nrow(iris), replace=F)
+iris.train=iris[-test.index,]
+iris.test=iris[test.index,]
+```
+
+We will use the knn3 function within the `caret` package to train the model on the training set and the predict function to make the predictions on the test set.
+
+```{r, message=FALSE, cache=TRUE}
+library(caret)
+knn_fit <- knn3(Species ~ Sepal.Length + Petal.Length, data = iris.train)
+y_hat_knn <- predict(knn_fit, iris.test, type = "class")
+library(e1071)
+confusionMatrix(y_hat_knn, iris.test$Species)$overall["Accuracy"]
+
+knn_fit <- knn3(Species ~ Sepal.Length + Petal.Length, data = iris.train, k=80)
+y_hat_knn <- predict(knn_fit, iris.test, type = "class")
+confusionMatrix(y_hat_knn, iris.test$Species)$overall["Accuracy"]
+```
+
+We then calculate the training and testing error with different k.
+
+```{r, message=FALSE, cache=TRUE}
+test.error=train.error=rep(NA,100)
+
+for(k in 1:100){
+  knn_fit <- knn3(Species ~ Sepal.Length + Petal.Length, data = iris.train, k=k)
+  # knn_fit <- knn3(Species ~ ., data = iris.train, k=k)
+  y_hat_knn <- predict(knn_fit, iris.train, type = "class")
+  train.error[k]=1-confusionMatrix(y_hat_knn, iris.train$Species)$overall["Accuracy"]
+  y_hat_knn <- predict(knn_fit, iris.test, type = "class")
+  test.error[k]=1-confusionMatrix(y_hat_knn, iris.test$Species)$overall["Accuracy"]
+}
+
+plot(1:100, test.error[100:1], type='l', ylim=c(0, max(c(train.error, test.error))), col=2, xaxt="n", ylab='Prediction error', xlab='1/K')
+points(1:100, train.error[100:1], type='l')
+axis(1, at=seq(1,100,10),labels=paste('1/',seq(100,10,-10),sep=''), las=2)
+legend('topright', col=c(1,2), legend=c('training','testing'), lty=c(1,1))
+```

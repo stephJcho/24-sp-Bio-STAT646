@@ -1,0 +1,114 @@
+---
+title: "Deep Neural Network in R"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load library
+
+```{r message=FALSE}
+library(keras)
+library(mlbench)
+library(dplyr)
+library(magrittr)
+library(neuralnet)
+```
+
+## Getting data
+
+```{r}
+data("BostonHousing")
+data <- BostonHousing
+str(data)
+```
+
+
+This data set contains 506 observations and 14 variables. The variables chas as a factor variable, we need to convert in into numerical variable because neural network handles only numerical data.
+
+Medv is the response variable, and the remaining are the predictors.
+
+We need to convert factor variables into numeric variables while using the below-mentioned command. This function automatically detects the factor variables and convert them into numerical variables.
+
+```{r}
+data %<>% mutate_if(is.factor, as.numeric)
+```
+
+
+## Neural network visualization in R
+
+Each predictor variable has one neuron, the first layer has 12 neurons, the second layer has 7 neurons and the out variable has one neuron.
+
+```{r}
+n <- neuralnet(medv ~ crim+zn+indus+chas+nox+rm+age+dis+rad+tax+ptratio+b+lstat,
+               data = data,
+               hidden = c(12,7),
+               linear.output = F,
+               lifesign = 'full',
+               rep=1)
+plot(n,col.hidden = 'darkgreen',     
+col.hidden.synapse = 'darkgreen',
+     show.weights = F,
+     information = F,
+     fill = 'lightblue')
+```
+
+## Data partition
+
+```{r}
+data <- as.matrix(data)
+dimnames(data) <- NULL
+set.seed(123)
+ind <- sample(2, nrow(data), replace = T, prob = c(.7, .3))
+training <- data[ind==1,1:13]
+test <- data[ind==2, 1:13]
+trainingtarget <- data[ind==1, 14]
+testtarget <- data[ind==2, 14]
+str(trainingtarget)
+str(testtarget)
+```
+
+
+## Scaling features
+```{r}
+m <- colMeans(training)
+s <- apply(training, 2, sd)
+training <- scale(training, center = m, scale = s)
+test <- scale(test, center = m, scale = s)
+```
+
+## Running model
+```{r}
+model <- keras_model_sequential()
+# model %>%
+#          layer_dense(units = 5, activation = 'relu', input_shape = c(13)) %>%
+#          layer_dense(units = 1)
+model %>%
+         layer_dense(units = 100, activation = 'relu', input_shape = c(13)) %>%
+        layer_dropout(rate=0.4)  %>%
+        layer_dense(units = 50, activation = 'relu')  %>%
+        layer_dropout(rate=0.2)  %>%
+         layer_dense(units = 1)
+model %>% compile(loss = 'mse', optimizer = 'rmsprop', metrics = 'mae') 
+
+mymodel <- model %>%          
+fit(training,trainingtarget,
+             epochs = 100,
+             batch_size = 32,
+             validation_split = 0.2,
+             verbose = 0)
+```
+
+## Prediction
+```{r}
+model %>% evaluate(test, testtarget)
+pred <- model %>% predict(test)
+mean(sqrt((testtarget-pred)^2))
+```
+```{r}
+plot(testtarget, pred) 
+```

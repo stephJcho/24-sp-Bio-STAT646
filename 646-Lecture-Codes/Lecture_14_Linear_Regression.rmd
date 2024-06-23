@@ -1,0 +1,142 @@
+---
+title: "Linear Regression"
+fig_width: 3
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+subtitle: STAT 446/646 Statistical Bioinformatics
+fig_height: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Data
+
+#### The MASS library contains the Boston data set, which records medv (median house value) for 506 neighborhoods around Boston. We will seek to predict medv using 13 predictors such as rm (average number of rooms per house), age (average age of houses), and lstat (percent of households with low socioeconomic status).
+
+```{r, message= FALSE}
+library(MASS)
+library(ISLR)
+library(dplyr)
+names(Boston)
+?Boston
+glimpse(Boston)
+
+# Let's add Boston dataset into Memory for easy access.
+attach(Boston)
+```
+
+# Simple Linear Regression
+```{r}
+lm.fit = lm(medv ~ lstat)
+
+plot(medv~lstat, pch=16)
+abline(lm.fit, col='red')
+```
+
+#### To fetch some basic information about the model:
+```{r}
+lm.fit
+summary(lm.fit)
+names(lm.fit)
+coefficients(lm.fit)
+```
+
+#### In order to obtain the confidence interval of the coefficients:
+
+```{r}
+confint(lm.fit)
+```
+
+#### Predict function can be used to produce confidence intervals and prediction intervals for the prediction of medv for a given value of lstat. Prediction interval gives a wider interval but centers around the same value as Confidence interval. This is because, Prediction interval takes into account the irreducible error always present in the Response variable.
+
+```{r}
+predict(lm.fit, data.frame(lstat=c(5, 10, 15)), interval = "confidence")
+predict(lm.fit, data.frame(lstat=c(5, 10, 15)), interval = "prediction")
+
+```
+
+
+# Multiple Linear Regression
+
+#### Let's introduce some new variables into the model to find out the effect of other predictors on medv.
+
+```{r}
+lm.fit = lm(medv ~ lstat + age, data= Boston)
+summary(lm.fit)
+
+```
+
+#### To check against all the predictors:
+
+```{r}
+lm.fit = lm(medv ~ ., data=Boston)
+summary(lm.fit)
+
+```
+
+#### To perform regression on not all of the variables. Let's remove the most non-significant ones (as per the last model).
+
+```{r}
+lm.fit1 = lm(medv ~ . -age-indus, data=Boston)
+summary(lm.fit1)
+```
+
+
+#### Alternatively, the update() function can also be used.
+
+```{r}
+lm.fit1 = update(lm.fit, ~.-age-indus)
+```
+
+
+
+# Interaction Effects
+
+#### To introduce interaction effects into a model:
+
+```{r}
+summary(lm(medv ~ lstat * age, data=Boston))
+summary(lm(medv ~ lstat : age, data=Boston))
+```
+
+
+#### We can use anova() to further quantify the extent to which the model with the interaction term is superior to the linear fit.
+```{r}
+lm.fit1 = lm(medv ~ lstat + age, data= Boston)
+lm.fit2 = lm(medv ~ lstat + age + lstat:age, data= Boston)
+anova(lm.fit1, lm.fit2)
+```
+
+#### anova() performa an hypthesis test with the Null hypothesis being both the models performing fairly equal. Whereas, the alternate hypothesis is in favor of the fuller model being superior.
+
+# Qualitative predictors
+
+#### We will now examine the Carseats data, which is part of the ISLR library. We will attempt to predict Sales (child car seat sales) in 400 locations based on a number of predictors.
+
+```{r}
+glimpse(Carseats)
+```
+
+####The Carseats data includes qualitative predictors such as Shelveloc, an indicator of the quality of the shelving location -- that is, the space within a store in which the car seat is displayed -- at each location. The predictor Shelveloc takes on three possible values, Bad, Medium, and Good.
+
+####Given a qualitative variable such as Shelveloc, R generates dummy variables automatically. Below we fit a multiple regression model that includes some interaction terms.
+
+```{r}
+lm.fit = lm(Sales ~ .+ Income:Advertising+Price:Age, data=Carseats)
+summary(lm.fit)
+```
+
+#### contrasts() can be used to refer the dumm variable notation used by R.
+
+```{r}
+contrasts(Carseats$ShelveLoc)
+```
+#### R has created a ShelveLocGood dummy variable that takes on a value of 1 if the shelving location is good, and 0 otherwise. It has also created a ShelveLocMedium dummy variable that equals 1 if the shelving location is medium, and 0 otherwise. A bad shelving location corresponds to a zero for each of the two dummy variables. The fact that the coefficient for ShelveLocGood in the regression output is positive indicates that a good shelving location is associated with high sales (relative to a bad location). And ShelveLocMedium has a smaller positive coefficient, indicating that a medium shelving location leads to higher sales than a bad shelving location but lower sales than a good shelving location.
